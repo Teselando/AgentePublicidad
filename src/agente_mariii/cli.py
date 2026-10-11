@@ -5,7 +5,9 @@ from __future__ import annotations
 import argparse
 from datetime import date, datetime
 import json
+from pathlib import Path
 
+from .campaign import record_confirmed_batch, top_groups
 from .core import MADRID, cell, madrid_now, normalized_name, parse_date, recommendations
 from .discovery import search
 from .sheets import Sheet
@@ -85,10 +87,33 @@ def discover(sheet: Sheet | None, *, write: bool, limit: int) -> None:
     print(f"{len(new_rows)} candidatos nuevos. No se han añadido a Grupos ni al Top.")
 
 
+def show_top(sheet: Sheet, limit: int) -> None:
+    choices = top_groups(sheet, limit)
+    for position, item in enumerate(choices, 1):
+        print(f"{position:2}. {item.name} [{item.group_id}] · {item.family}")
+    if not choices:
+        print("No hay grupos elegibles en el Top actual.")
+
+
+def confirmed_batch(sheet: Sheet, path: Path, *, require_top: bool) -> None:
+    confirmations = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(confirmations, list):
+        raise ValueError("El archivo de confirmaciones debe ser una lista JSON.")
+    ids = record_confirmed_batch(sheet, confirmations, require_top=require_top)
+    print(f"{len(ids)} envíos confirmados anotados en Historial: {', '.join(ids)}")
+    print("Siguiente Top calculado por la hoja:")
+    show_top(sheet, 30)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Gestor de grupos vinculado a Google Sheets")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("recommend").add_argument("--limit", type=int, default=30)
+    top = sub.add_parser("weekly-top", help="Mostrar la tanda calculada por Top recomendaciones")
+    top.add_argument("--limit", type=int, default=30)
+    batch = sub.add_parser("record-batch", help="Anotar solo envíos ya confirmados y mostrar el Top siguiente")
+    batch.add_argument("confirmations", type=Path, help="JSON privado con group_id, sent_at y evidence")
+    batch.add_argument("--allow-outside-top", action="store_true", help="Anotar un envío confirmado fuera del Top actual")
     sent = sub.add_parser("record-send")
     sent.add_argument("group", help="ID Gxxxx o nombre exacto")
     sent.add_argument("--at", help="Fecha/hora ISO local Europe/Madrid, por ejemplo 2026-10-06T20:30")
@@ -102,6 +127,10 @@ def main() -> None:
         discover(Sheet() if args.write else None, write=args.write, limit=args.limit)
     elif args.command == "recommend":
         recommend(Sheet(), args.limit)
+    elif args.command == "weekly-top":
+        show_top(Sheet(), args.limit)
+    elif args.command == "record-batch":
+        confirmed_batch(Sheet(), args.confirmations, require_top=not args.allow_outside_top)
     else:
         record_send(Sheet(), args.group, args.at, args.notes, args.force)
 
