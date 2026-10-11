@@ -8,3 +8,4 @@ credentials*.json
 service-account*.json
 exports/
 data/
+private/
